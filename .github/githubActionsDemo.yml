@@ -1,0 +1,117 @@
+name: Laravel CI/CD Pipeline
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  testing:
+    name: Laravel - PHP ${{ matrix.php-versions }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php-versions: ['8.1', '8.2', '8.3']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP, with composer and extensions
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: ${{ matrix.php-versions }}
+        coverage: xdebug
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_sqlite, dom, filter, gd, iconv, json, mbstring, pdo, phar, tokenizer, xml, xmlwriter, zip
+        tools: composer:v2
+
+    - name: Get composer cache directory
+      id: composercache
+      run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+    - name: Cache composer dependencies
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.composercache.outputs.dir }}
+        key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+        restore-keys: ${{ runner.os }}-composer-
+
+    - name: Copy .env.example to .env
+      run: cp .env.example .env
+
+    - name: Install dependencies
+      run: composer install --no-interaction --no-progress --prefer-dist
+
+    - name: Generate application key
+      run: php artisan key:generate
+
+    - name: Create SQLite database
+      run: |
+        touch database/database.sqlite
+        php artisan migrate --force
+
+    - name: Run PHPUnit tests
+      run: php artisan test
+
+    - name: Run PHPStan static analysis
+      run: |
+        composer require --dev phpstan/phpstan
+        ./vendor/bin/phpstan analyse app --level=5
+
+    - name: Run Laravel Pint (Code Style)
+      run: |
+        composer require --dev laravel/pint
+        ./vendor/bin/pint --test
+
+  security:
+    name: Security Check
+    runs-on: ubuntu-latest
+    needs: testing
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        tools: composer:v2
+
+    - name: Install dependencies
+      run: composer install --no-interaction --no-progress --prefer-dist
+
+    - name: Run Security Check
+      run: |
+        composer require --dev enlightn/security-checker
+        ./vendor/bin/security-checker security:check composer.lock
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [testing, security]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        tools: composer:v2
+
+    - name: Install dependencies
+      run: composer install --no-interaction --no-progress --prefer-dist --optimize-autoloader --no-dev
+
+    - name: Build assets (if using Vite)
+      run: |
+        npm install
+        npm run build
+
+    - name: Deploy to server
+      run: |
+        echo "Deployment step - Configure your deployment strategy here"
+        # Example: rsync, SSH deployment, or cloud platform deployment
