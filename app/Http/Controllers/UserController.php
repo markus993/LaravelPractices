@@ -6,6 +6,6 @@ class UserController extends Controller
 {
     public function index()
     {
-        return array('nombre' => 'Juan', 'edad' => 20);
+        return ['nombre' => 'Juan', 'edad' => 20];
     }
 }
